@@ -14,23 +14,25 @@
 #endif
 
 #if defined(__GNUC__)
-    // Attributes to prevent 'unused' function from being removed and to make it visible
-    #define FUNCTION_ATTRIBUTE __attribute__((visibility("default"))) __attribute__((used))
+// Attributes to prevent 'unused' function from being removed and to make it visible
+#define FUNCTION_ATTRIBUTE __attribute__((visibility("default"))) __attribute__((used))
 #elif defined(_MSC_VER)
-    // Marking a function for export
-    #define FUNCTION_ATTRIBUTE __declspec(dllexport)
+// Marking a function for export
+#define FUNCTION_ATTRIBUTE __declspec(dllexport)
 #endif
 
 using namespace cv;
 using namespace std;
 
-long long int get_now() {
+long long int get_now()
+{
     return chrono::duration_cast<std::chrono::milliseconds>(
-            chrono::system_clock::now().time_since_epoch()
-    ).count();
+               chrono::system_clock::now().time_since_epoch())
+        .count();
 }
 
-void platform_log(const char *fmt, ...) {
+void platform_log(const char *fmt, ...)
+{
     va_list args;
     va_start(args, fmt);
 #ifdef __ANDROID__
@@ -48,31 +50,57 @@ void platform_log(const char *fmt, ...) {
 }
 
 // Avoiding name mangling
-extern "C" {
+extern "C"
+{
     FUNCTION_ATTRIBUTE
-    const char* version() {
+    const char *version()
+    {
         return CV_VERSION;
     }
 
     FUNCTION_ATTRIBUTE
-    void process_image(char* inputImagePath, char* outputImagePath) {
+    void process_image(char *inputImagePath, char *outputImagePath)
+    {
         long long start = get_now();
-        
-        Mat input = imread(inputImagePath, IMREAD_GRAYSCALE);
-        Mat threshed, withContours;
 
-        vector<vector<Point>> contours;
-        vector<Vec4i> hierarchy;
-        
+        Mat input = imread(inputImagePath, IMREAD_GRAYSCALE);
+        platform_log("img_type:%d", input.type());
+        Mat threshed, withContours = {};
+
+        vector<vector<Point>> contours = {};
+        vector<Vec4i> hierarchy = {};
+
         adaptiveThreshold(input, threshed, 255, ADAPTIVE_THRESH_GAUSSIAN_C, THRESH_BINARY_INV, 77, 6);
-        findContours(threshed, contours, hierarchy, RETR_TREE, CHAIN_APPROX_TC89_L1);
-        
+
+        try
+        {
+            findContours(threshed, contours, hierarchy, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+        }
+        catch (cv::Exception &e)
+        {
+            platform_log(e.what());
+            goto cleanup;
+        }
+        catch (std::exception &e)
+        {
+            platform_log(e.what());
+            goto cleanup;
+        }
+
+        findContours(threshed, contours, hierarchy, RETR_EXTERNAL, CHAIN_APPROX_SIMPLE);
+
         cvtColor(threshed, withContours, COLOR_GRAY2BGR);
         drawContours(withContours, contours, -1, Scalar(0, 255, 0), 4);
-        
-        imwrite(outputImagePath, withContours);
-        
-        int evalInMillis = static_cast<int>(get_now() - start);
-        platform_log("Processing done in %dms\n", evalInMillis);
+
+        imwrite(outputImagePath, threshed);
+
+        // Putting this in a scope avoids uninitialized variable warning
+        {
+            int evalInMillis = static_cast<int>(get_now() - start);
+            platform_log("Processing done in %dms\n", evalInMillis);
+        }
+
+    cleanup:
+        return;
     }
 }
